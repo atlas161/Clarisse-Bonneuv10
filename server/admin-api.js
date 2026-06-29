@@ -76,6 +76,58 @@ const getDefaultClientRole = () => 'client';
 const getAllowedManagedRole = (value) => (String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'client');
 const ADMIN_MFA_REMEMBER_WINDOW_MS = 24 * 60 * 60 * 1000;
 const SERVER_DEBUG_HTTP_ENABLED = String(process.env.ADMIN_DEBUG_HTTP || '').trim().toLowerCase() === 'true';
+const SUPABASE_FETCH_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(String(process.env.SUPABASE_FETCH_TIMEOUT_MS || '7000'), 10);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 7000;
+  }
+  return Math.min(Math.max(raw, 2000), 9000);
+})();
+
+const createTimeoutSignal = (signal, timeoutMs) => {
+  const controller = new AbortController();
+
+  const onAbort = () => {
+    controller.abort(signal?.reason);
+  };
+
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error('timeout'));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    },
+  };
+};
+
+const fetchWithTimeout = async (input, init = {}) => {
+  const timeoutMs = Number.isFinite(init?.timeoutMs) ? init.timeoutMs : SUPABASE_FETCH_TIMEOUT_MS;
+  const { signal, cleanup } = createTimeoutSignal(init?.signal, timeoutMs);
+
+  try {
+    const response = await fetch(input, {
+      ...init,
+      signal,
+    });
+    return response;
+  } finally {
+    cleanup();
+  }
+};
 
 // #region debug-point A:reporter
 const reportFolderDebug = (hypothesisId, location, msg, data = {}) =>
@@ -305,6 +357,9 @@ const getSupabaseAdmin = () => {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+    },
+    global: {
+      fetch: fetchWithTimeout,
     },
   });
 };

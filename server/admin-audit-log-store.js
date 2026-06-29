@@ -4,6 +4,57 @@ import { createClient } from '@supabase/supabase-js';
 
 const STORE_PATH = path.resolve(process.cwd(), 'server', 'admin-audit-log-store.json');
 const SUPABASE_AUDIT_TABLE = String(process.env.SUPABASE_ADMIN_AUDIT_TABLE || 'admin_audit_logs').trim();
+const SUPABASE_FETCH_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(String(process.env.SUPABASE_FETCH_TIMEOUT_MS || '6000'), 10);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 6000;
+  }
+  return Math.min(Math.max(raw, 2000), 9000);
+})();
+
+const createTimeoutSignal = (signal, timeoutMs) => {
+  const controller = new AbortController();
+
+  const onAbort = () => {
+    controller.abort(signal?.reason);
+  };
+
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error('timeout'));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    },
+  };
+};
+
+const fetchWithTimeout = async (input, init = {}) => {
+  const timeoutMs = Number.isFinite(init?.timeoutMs) ? init.timeoutMs : SUPABASE_FETCH_TIMEOUT_MS;
+  const { signal, cleanup } = createTimeoutSignal(init?.signal, timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal,
+    });
+  } finally {
+    cleanup();
+  }
+};
 
 const DEFAULT_PAYLOAD = {
   entries: [],
@@ -82,6 +133,9 @@ const getSupabaseAuditClient = () => {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      fetch: fetchWithTimeout,
     },
   });
 
