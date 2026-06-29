@@ -19,11 +19,24 @@ const createMockRequest = (event) => {
   searchParams.delete('route');
   req.url = `${route ? `/${route}` : '/'}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
 
-  queueMicrotask(() => {
+  let flushed = false;
+  const flushBody = () => {
+    if (flushed) {
+      return;
+    }
+    flushed = true;
     if (body) {
       req.emit('data', body);
     }
     req.emit('end');
+  };
+
+  req.on('newListener', (eventName) => {
+    if (eventName !== 'data' && eventName !== 'end') {
+      return;
+    }
+
+    queueMicrotask(flushBody);
   });
 
   return req;
