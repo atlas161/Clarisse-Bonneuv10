@@ -1572,6 +1572,13 @@ const createManagedUser = async (body) => {
   }
 
   const effectivePassword = password || randomBytes(18).toString('base64url');
+  const userMetadata = password
+    ? metadata
+    : {
+        ...metadata,
+        password_change_required: true,
+        temporary_password_issued_at: new Date().toISOString(),
+      };
 
   if (effectivePassword.length < 8) {
     throw new HttpError(400, 'Le mot de passe doit contenir au moins 8 caracteres.', 'invalid_user_password');
@@ -1581,7 +1588,7 @@ const createManagedUser = async (body) => {
     email,
     password: effectivePassword,
     email_confirm: true,
-    user_metadata: metadata,
+    user_metadata: userMetadata,
     app_metadata: {
       role,
     },
@@ -1602,7 +1609,7 @@ const createManagedUser = async (body) => {
       },
       user_metadata: {
         ...(data.user.user_metadata || {}),
-        ...metadata,
+        ...userMetadata,
       },
     }),
   };
@@ -1648,7 +1655,6 @@ const updateManagedUser = async (body) => {
 
 const createManagedPasswordResetLink = async (body) => {
   const normalizedUserId = String(body.userId || '').trim();
-  const redirectTo = String(body.redirectTo || getClientInviteRedirect()).trim();
   const managedUser = await getManagedUserById(normalizedUserId);
 
   if (!managedUser?.email) {
@@ -1656,21 +1662,34 @@ const createManagedPasswordResetLink = async (body) => {
   }
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.auth.admin.generateLink({
-    type: 'recovery',
-    email: managedUser.email,
-    options: {
-      redirectTo,
+  const temporaryPassword = randomBytes(18).toString('base64url');
+  const { data, error } = await supabase.auth.admin.updateUserById(normalizedUserId, {
+    password: temporaryPassword,
+    user_metadata: {
+      display_name: managedUser.displayName,
+      password_change_required: true,
+      temporary_password_issued_at: new Date().toISOString(),
     },
   });
 
-  if (error || !data.properties?.action_link) {
-    throw new HttpError(400, error?.message || 'Impossible de generer le lien de reinitialisation.', 'password_reset_link_failed');
+  if (error || !data.user) {
+    throw new HttpError(400, error?.message || 'Impossible de regenerer le mot de passe temporaire.', 'temporary_password_reset_failed');
   }
 
   return {
-    user: managedUser,
-    actionLink: data.properties.action_link,
+    user: await toManagedUserPayload({
+      ...data.user,
+      app_metadata: {
+        ...(data.user.app_metadata || {}),
+        role: managedUser.role,
+      },
+      user_metadata: {
+        ...(data.user.user_metadata || {}),
+        display_name: managedUser.displayName,
+        password_change_required: true,
+      },
+    }),
+    temporaryPassword,
   };
 };
 
@@ -2225,7 +2244,7 @@ const handleUserPasswordResetLink = async (req, res) => {
   const body = await readBody(req);
   const payload = await createManagedPasswordResetLink(body);
   await appendAuditLog(
-    createAuditEntry(session, 'password_reset_link_created', 'user', payload.user.email, {
+    createAuditEntry(session, 'temporary_password_reset', 'user', payload.user.email, {
       ...getAuditRequestDetails(req),
     }, payload.user.id)
   );

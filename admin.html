@@ -360,6 +360,26 @@
               </form>
             </dialog>
 
+            <dialog class="admin-folder-dialog" data-admin-reset-password-dialog aria-labelledby="admin-reset-password-dialog-title" aria-hidden="true">
+              <header class="admin-folder-dialog__header">
+                <p class="contact-panel__eyebrow">Sécurité</p>
+                <h3 id="admin-reset-password-dialog-title">Mot de passe temporaire généré</h3>
+                <p class="admin-help">Partagez ce mot de passe temporaire au client. Lors de sa prochaine connexion, il devra définir un nouveau mot de passe avant la 2FA.</p>
+                <button class="button-outline admin-inline-button admin-folder-dialog__close" type="button" data-admin-close-reset-password-dialog>Fermer</button>
+              </header>
+
+              <div class="admin-form admin-form--compact admin-folder-dialog__form">
+                <label class="contact-field contact-field--full">
+                  <span>Mot de passe temporaire</span>
+                  <input type="text" readonly data-admin-reset-password-output />
+                </label>
+                <div class="admin-form__actions admin-folder-dialog__actions">
+                  <button class="button-outline" type="button" data-admin-copy-reset-password>Copier</button>
+                  <button class="button-outline admin-primary-button" type="button" data-admin-close-reset-password-dialog>Terminer</button>
+                </div>
+              </div>
+            </dialog>
+
             <section class="admin-panel admin-panel--assets" data-admin-library-panel aria-label="Bibliothèque du dossier">
               <section class="admin-library-summary" data-admin-library-summary hidden>
                 <div class="admin-library-summary__heading">

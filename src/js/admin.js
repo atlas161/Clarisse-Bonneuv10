@@ -50,7 +50,7 @@ const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
 const normalizeAuthLinkType = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === 'invite' || normalized === 'recovery' ? normalized : null;
+  return normalized === 'invite' || normalized === 'recovery' || normalized === 'temporary' ? normalized : null;
 };
 
 const getAuthLinkTypeFromLocation = () => {
@@ -286,6 +286,10 @@ const dom = {
   folderDialogLabel: document.querySelector('[data-admin-folder-dialog-label]'),
   folderDialogInput: document.querySelector('[data-admin-folder-dialog-input]'),
   folderDialogSubmit: document.querySelector('[data-admin-folder-dialog-submit]'),
+  resetPasswordDialog: document.querySelector('[data-admin-reset-password-dialog]'),
+  resetPasswordDialogOutput: document.querySelector('[data-admin-reset-password-output]'),
+  closeResetPasswordDialogButtons: document.querySelectorAll('[data-admin-close-reset-password-dialog]'),
+  copyResetPasswordButton: document.querySelector('[data-admin-copy-reset-password]'),
   folderSearchForm: document.querySelector('[data-admin-folder-search-form]'),
   folderSearchField: document.querySelector('[data-admin-folder-search-field]'),
   folderSearchInput: document.querySelector('[data-admin-folder-search]'),
@@ -451,6 +455,7 @@ const state = {
   previewReturnFocus: null,
   folderDialogScrollY: 0,
   folderDialogReturnFocus: null,
+  resetPasswordDialogReturnFocus: null,
   confirmResolver: null,
   confirmReturnFocus: null,
   activePane: 'library',
@@ -505,6 +510,8 @@ const getRoleFromSessionUser = (user) => {
 
   return 'client';
 };
+
+const isTemporaryPasswordFlow = (user) => Boolean(user?.user_metadata?.password_change_required);
 
 const getFactorLabel = (factor, fallbackIndex = 0) =>
   String(factor?.friendly_name || '').trim() || `Appareil ${fallbackIndex + 1}`;
@@ -657,6 +664,7 @@ const clearPasswordGate = () => {
 const renderPasswordGate = () => {
   const flowType = normalizeAuthLinkType(state.authFlow.pendingType) || 'recovery';
   const isInvite = flowType === 'invite';
+  const isTemporary = flowType === 'temporary';
 
   clearMfaGate();
   clearPasswordGate();
@@ -665,23 +673,35 @@ const renderPasswordGate = () => {
   showAuth();
 
   if (dom.passwordEyebrow) {
-    dom.passwordEyebrow.textContent = isInvite ? 'Invitation acceptée' : 'Réinitialisation sécurisée';
+    dom.passwordEyebrow.textContent = isInvite
+      ? 'Invitation acceptée'
+      : isTemporary
+        ? 'Première connexion sécurisée'
+        : 'Réinitialisation sécurisée';
   }
 
   if (dom.passwordTitle) {
-    dom.passwordTitle.textContent = isInvite ? 'Créer votre mot de passe' : 'Choisir un nouveau mot de passe';
+    dom.passwordTitle.textContent = isInvite
+      ? 'Créer votre mot de passe'
+      : isTemporary
+        ? 'Remplacer le mot de passe temporaire'
+        : 'Choisir un nouveau mot de passe';
   }
 
   if (dom.passwordDescription) {
     dom.passwordDescription.textContent = isInvite
       ? 'Définissez maintenant votre mot de passe pour activer votre accès. La configuration 2FA s’ouvrira juste après.'
-      : 'Choisissez un nouveau mot de passe pour sécuriser votre accès. La vérification 2FA reprendra ensuite automatiquement.';
+      : isTemporary
+        ? 'Votre connexion avec mot de passe temporaire est bien reconnue. Choisissez maintenant un mot de passe personnel avant de continuer.'
+        : 'Choisissez un nouveau mot de passe pour sécuriser votre accès. La vérification 2FA reprendra ensuite automatiquement.';
   }
 
   if (dom.passwordHighlight) {
     dom.passwordHighlight.textContent = isInvite
       ? 'Votre invitation email a déjà été validée. Cette étape sert uniquement à définir votre mot de passe avant l’accès protégé.'
-      : 'Votre lien de réinitialisation est bien reconnu. Enregistrez simplement votre nouveau mot de passe pour reprendre l’accès.';
+      : isTemporary
+        ? 'Le mot de passe temporaire ne sert qu à la première connexion. Remplacez-le maintenant pour sécuriser définitivement ce compte.'
+        : 'Votre lien de réinitialisation est bien reconnu. Enregistrez simplement votre nouveau mot de passe pour reprendre l’accès.';
   }
 
   if (dom.passwordHelp) {
@@ -1056,6 +1076,46 @@ const closeFolderDialog = () => {
   }
 
   state.folderDialogReturnFocus = null;
+};
+
+const openResetPasswordDialog = (temporaryPassword, returnFocus = null) => {
+  if (!(dom.resetPasswordDialog instanceof HTMLDialogElement)) {
+    return;
+  }
+
+  state.resetPasswordDialogReturnFocus = returnFocus instanceof HTMLElement ? returnFocus : null;
+
+  if (dom.resetPasswordDialogOutput instanceof HTMLInputElement) {
+    dom.resetPasswordDialogOutput.value = String(temporaryPassword || '').trim();
+  }
+
+  syncFolderDialogScrollLock(true);
+  dom.resetPasswordDialog.showModal();
+  dom.resetPasswordDialog.setAttribute('aria-hidden', 'false');
+
+  window.setTimeout(() => {
+    dom.resetPasswordDialogOutput?.focus();
+    dom.resetPasswordDialogOutput?.select();
+  }, 0);
+};
+
+const closeResetPasswordDialog = () => {
+  if (dom.resetPasswordDialog instanceof HTMLDialogElement && dom.resetPasswordDialog.open) {
+    dom.resetPasswordDialog.close();
+    dom.resetPasswordDialog.setAttribute('aria-hidden', 'true');
+  }
+
+  syncFolderDialogScrollLock(false);
+
+  if (dom.resetPasswordDialogOutput instanceof HTMLInputElement) {
+    dom.resetPasswordDialogOutput.value = '';
+  }
+
+  if (state.resetPasswordDialogReturnFocus instanceof HTMLElement) {
+    state.resetPasswordDialogReturnFocus.focus();
+  }
+
+  state.resetPasswordDialogReturnFocus = null;
 };
 
 const syncFolderMode = () => {
@@ -3360,20 +3420,14 @@ const renderUsers = () => {
           method: 'POST',
           body: {
             userId: user.id,
-            redirectTo: `${window.location.origin}/admin.html`,
           },
         });
 
-        const copied = await copyTextToClipboard(payload?.actionLink || '');
-        setStatus(
-          copied
-            ? `Lien de reset copié pour ${user.email}.`
-            : `Lien de reset généré pour ${user.email}.`,
-          'success'
-        );
+        openResetPasswordDialog(payload?.temporaryPassword || '', resetPasswordButton);
+        setStatus(`Un mot de passe temporaire a été généré pour ${user.email}.`, 'success');
         await loadLogs();
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : 'Le lien de réinitialisation a échoué.', 'error');
+        setStatus(error instanceof Error ? error.message : 'La régénération du mot de passe temporaire a échoué.', 'error');
       } finally {
         setBusy(resetPasswordButton, false, 'Génération...');
       }
@@ -4360,11 +4414,17 @@ const syncSession = async (session) => {
   }
 
   try {
+    if (isTemporaryPasswordFlow(session?.user)) {
+      state.authFlow.pendingType = 'temporary';
+    }
+
     if (normalizeAuthLinkType(state.authFlow.pendingType)) {
       renderPasswordGate();
       setStatus(
         state.authFlow.pendingType === 'invite'
           ? 'Choisissez maintenant votre mot de passe pour finaliser l’invitation.'
+          : state.authFlow.pendingType === 'temporary'
+            ? 'Ce compte utilise encore un mot de passe temporaire. Définissez maintenant votre mot de passe personnel.'
           : 'Définissez votre nouveau mot de passe pour terminer la réinitialisation.',
         'info'
       );
@@ -4771,8 +4831,17 @@ const bindEvents = () => {
     setBusy(dom.passwordSubmitButton, true, 'Validation...');
 
     try {
+      const currentUserMetadata =
+        state.session?.user?.user_metadata && typeof state.session.user.user_metadata === 'object'
+          ? state.session.user.user_metadata
+          : {};
       const { error } = await state.supabase.auth.updateUser({
         password,
+        data: {
+          ...currentUserMetadata,
+          password_change_required: false,
+          temporary_password_issued_at: null,
+        },
       });
 
       if (error) {
@@ -5135,6 +5204,42 @@ const bindEvents = () => {
   dom.folderDialog?.addEventListener('click', (event) => {
     if (event.target === dom.folderDialog) {
       closeFolderDialog();
+    }
+  });
+
+  dom.closeResetPasswordDialogButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      closeResetPasswordDialog();
+    });
+  });
+
+  dom.copyResetPasswordButton?.addEventListener('click', async () => {
+    const temporaryPassword =
+      dom.resetPasswordDialogOutput instanceof HTMLInputElement ? dom.resetPasswordDialogOutput.value.trim() : '';
+
+    if (!temporaryPassword) {
+      return;
+    }
+
+    try {
+      const copied = await copyTextToClipboard(temporaryPassword);
+      if (!copied) {
+        throw new Error('copy_failed');
+      }
+      setStatus('Mot de passe temporaire copié.', 'success');
+    } catch {
+      setStatus("Impossible de copier automatiquement le mot de passe temporaire.", 'error');
+    }
+  });
+
+  dom.resetPasswordDialog?.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeResetPasswordDialog();
+  });
+
+  dom.resetPasswordDialog?.addEventListener('click', (event) => {
+    if (event.target === dom.resetPasswordDialog) {
+      closeResetPasswordDialog();
     }
   });
 
