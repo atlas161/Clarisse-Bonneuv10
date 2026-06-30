@@ -1048,9 +1048,18 @@ const openFolderDialog = (mode = 'create') => {
   }
 
   if (dom.folderDialog instanceof HTMLDialogElement) {
-    syncFolderDialogScrollLock(true);
-    dom.folderDialog.showModal();
-    dom.folderDialog.setAttribute('aria-hidden', 'false');
+    if (dom.folderDialog.open) {
+      dom.folderDialog.setAttribute('aria-hidden', 'false');
+    } else {
+      try {
+        syncFolderDialogScrollLock(true);
+        dom.folderDialog.showModal();
+        dom.folderDialog.setAttribute('aria-hidden', 'false');
+      } catch (error) {
+        syncFolderDialogScrollLock(false);
+        throw error;
+      }
+    }
   }
 
   window.setTimeout(() => {
@@ -1072,7 +1081,9 @@ const closeFolderDialog = () => {
   }
 
   if (state.folderDialogReturnFocus instanceof HTMLElement) {
-    state.folderDialogReturnFocus.focus();
+    if (state.folderDialogReturnFocus.isConnected) {
+      state.folderDialogReturnFocus.focus();
+    }
   }
 
   state.folderDialogReturnFocus = null;
@@ -1089,9 +1100,18 @@ const openResetPasswordDialog = (temporaryPassword, returnFocus = null) => {
     dom.resetPasswordDialogOutput.value = String(temporaryPassword || '').trim();
   }
 
-  syncFolderDialogScrollLock(true);
-  dom.resetPasswordDialog.showModal();
-  dom.resetPasswordDialog.setAttribute('aria-hidden', 'false');
+  if (dom.resetPasswordDialog.open) {
+    dom.resetPasswordDialog.setAttribute('aria-hidden', 'false');
+  } else {
+    try {
+      syncFolderDialogScrollLock(true);
+      dom.resetPasswordDialog.showModal();
+      dom.resetPasswordDialog.setAttribute('aria-hidden', 'false');
+    } catch (error) {
+      syncFolderDialogScrollLock(false);
+      throw error;
+    }
+  }
 
   window.setTimeout(() => {
     dom.resetPasswordDialogOutput?.focus();
@@ -1111,7 +1131,7 @@ const closeResetPasswordDialog = () => {
     dom.resetPasswordDialogOutput.value = '';
   }
 
-  if (state.resetPasswordDialogReturnFocus instanceof HTMLElement) {
+  if (state.resetPasswordDialogReturnFocus instanceof HTMLElement && state.resetPasswordDialogReturnFocus.isConnected) {
     state.resetPasswordDialogReturnFocus.focus();
   }
 
